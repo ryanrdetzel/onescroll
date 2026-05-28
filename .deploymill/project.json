@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "name": "onescroll",
+  "domains": {
+    "prod": "onescroll-detzel.apps.deploymill.com"
+  },
+  "mounts": [],
+  "rollback": false
+}
