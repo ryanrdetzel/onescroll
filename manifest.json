@@ -1,0 +1,11 @@
+{
+  "topics": [
+    {
+      "slug": "oauth",
+      "title": "OAuth 2.0",
+      "blurb": "How third-party apps get permission to act on your behalf — without ever seeing your password.",
+      "generated": "2026-05-28",
+      "volatility": "evergreen"
+    }
+  ]
+}
