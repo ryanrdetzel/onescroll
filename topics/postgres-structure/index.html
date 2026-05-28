@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How Postgres Is Structured · onescroll.dev</title>
+  <meta name="description" content="A one-page deep dive on how a PostgreSQL database is structured — the cluster / database / schema / table / row nesting, the self-describing system catalog, what's global vs per-database, and how it all maps to disk.">
+  <link rel="stylesheet" href="/_shared/freshness.css">
+
+  <script type="application/json" id="onescroll-meta">
+  {
+    "topic": "postgres-structure",
+    "title": "How Postgres Is Structured",
+    "generated": "2026-05-28",
+    "volatility": "evergreen",
+    "sources": [
+      { "title": "PostgreSQL Documentation — Database Roles, Schemas, Storage", "url": "https://www.postgresql.org/docs/current/", "date": "2025-09-25" },
+      { "title": "PostgreSQL Docs — Schemas (search_path)", "url": "https://www.postgresql.org/docs/current/ddl-schemas.html", "date": "2025-09-25" },
+      { "title": "PostgreSQL Docs — Database File Layout", "url": "https://www.postgresql.org/docs/current/storage-file-layout.html", "date": "2025-09-25" },
+      { "title": "PostgreSQL Docs — System Catalogs", "url": "https://www.postgresql.org/docs/current/catalogs.html", "date": "2025-09-25" }
+    ]
+  }
+  </script>
+
+  <style>
+    :root {
+      --paper:      #f4ecd6;
+      --paper-lift: #efe5c9;
+      --panel:      #eadfbe;
+      --ink:        #1d2742;
+      --ink-soft:   #3a4566;
+      --dim:        #6a6450;
+      --oak:        #9c5a23;
+      --oak-deep:   #7e4716;
+      --rule:       #d9caa3;
+      --rule-soft:  #e3d6b3;
+      --rust:       #a8431f;
+      --sage:       #5b6b4f;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        repeating-linear-gradient(0deg, transparent 0 38px, rgba(157,90,35,0.035) 38px 39px),
+        var(--paper);
+      color: var(--ink);
+      font: 17px/1.7 ui-sans-serif, "Helvetica Neue", system-ui, -apple-system, Arial, sans-serif;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+      html { scroll-behavior: auto; }
+    }
+
+    .onescroll-backlink {
+      position: fixed;
+      top: 18px; left: 18px;
+      z-index: 100;
+      font: 13px/1 ui-monospace, "SF Mono", Menlo, monospace;
+      color: var(--ink-soft);
+      text-decoration: none;
+      padding: 9px 13px;
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      background: rgba(244, 236, 214, 0.85);
+      backdrop-filter: blur(6px);
+      letter-spacing: 0.02em;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+    .onescroll-backlink:hover { color: var(--oak); border-color: var(--oak); }
+
+    main { max-width: 760px; margin: 0 auto; padding: 92px 24px 120px; }
+
+    /* HERO */
+    .hero {
+      padding: 40px 0 64px;
+      border-bottom: 3px double var(--rule);
+      margin-bottom: 64px;
+    }
+    .kicker {
+      font: 12px/1 ui-monospace, monospace;
+      color: var(--oak-deep);
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      margin-bottom: 26px;
+    }
+    h1 {
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      font-size: clamp(42px, 8.5vw, 76px);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1.04;
+      margin: 0 0 26px;
+      color: var(--ink);
+    }
+    .lede {
+      font-size: 20px;
+      line-height: 1.55;
+      color: var(--ink-soft);
+      max-width: 54ch;
+      margin: 0;
+    }
+    .lede strong { color: var(--ink); font-weight: 600; }
+
+    /* SECTIONS */
+    section { margin-bottom: 76px; scroll-margin-top: 28px; }
+    h2 {
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      font-size: 33px;
+      font-weight: 600;
+      letter-spacing: -0.012em;
+      line-height: 1.15;
+      margin: 0 0 22px;
+      color: var(--ink);
+    }
+    h2 .num {
+      display: inline-block;
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+      color: var(--oak);
+      vertical-align: top;
+      margin-right: 12px;
+      padding-top: 11px;
+    }
+    h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin: 30px 0 8px;
+      color: var(--oak-deep);
+      letter-spacing: 0.01em;
+    }
+    p { margin: 0 0 18px; }
+    em { color: var(--ink); font-style: italic; }
+    a { color: var(--oak-deep); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+    a:hover { color: var(--rust); }
+    code:not(pre code) {
+      font: 0.86em ui-monospace, "SF Mono", Menlo, monospace;
+      background: var(--panel);
+      color: var(--oak-deep);
+      padding: 1px 6px;
+      border-radius: 3px;
+      border: 1px solid var(--rule-soft);
+    }
+
+    /* NESTING DIAGRAM */
+    .nest {
+      margin: 30px 0;
+      font: 14px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    .layer {
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      padding: 14px 16px 16px;
+      margin-top: -1px;
+      background: var(--paper-lift);
+      position: relative;
+      transition: opacity 0.5s, transform 0.5s;
+    }
+    /* Hidden-until-revealed only when JS is present; no-JS shows everything. */
+    .js .layer { opacity: 0; transform: translateY(10px); }
+    .js .layer.in { opacity: 1; transform: translateY(0); }
+    .layer + .layer-wrap, .nest > .layer { }
+    .layer .tag {
+      display: inline-block;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--oak-deep);
+      background: var(--panel);
+      border: 1px solid var(--rule);
+      border-radius: 999px;
+      padding: 3px 10px;
+      margin-bottom: 10px;
+    }
+    .layer .name { color: var(--ink); font-weight: 700; }
+    .layer .note { color: var(--dim); font-size: 12.5px; display: block; margin-top: 6px; }
+    .l-cluster { background: var(--paper); border-color: var(--oak); border-width: 2px; }
+    .l-cluster > .inner { padding: 8px; }
+    .l-db   { background: var(--paper-lift); }
+    .l-schema { background: var(--panel); }
+    .l-table  { background: var(--paper-lift); border-style: dashed; }
+    .l-row {
+      background: var(--paper);
+      border-style: dotted;
+      font-size: 12.5px;
+      color: var(--dim);
+    }
+    .indent { margin-left: 14px; }
+    .global-side {
+      margin-top: 12px;
+      padding: 10px 14px;
+      border: 1px dashed var(--sage);
+      border-radius: 8px;
+      background: rgba(91,107,79,0.06);
+      font-size: 12.5px;
+      color: var(--sage);
+    }
+    .global-side b { color: var(--ink); }
+
+    /* SCOPE TABLE */
+    .scope {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 26px 0;
+      font-size: 14.5px;
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .scope th, .scope td {
+      text-align: left;
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--rule-soft);
+      vertical-align: top;
+    }
+    .scope thead th {
+      background: var(--panel);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--oak-deep);
+    }
+    .scope td:first-child {
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+      color: var(--ink);
+      white-space: nowrap;
+    }
+    .scope .gl { color: var(--oak-deep); font-weight: 700; }
+    .scope .lo { color: var(--sage); font-weight: 700; }
+    .scope tr:last-child td { border-bottom: none; }
+    @media (max-width: 540px) {
+      .scope, .scope thead, .scope tbody, .scope tr, .scope th, .scope td { display: block; }
+      .scope thead { display: none; }
+      .scope tr { border-bottom: 1px solid var(--rule); padding: 6px 0; }
+      .scope td { border: none; padding: 4px 14px; }
+      .scope td:first-child { padding-top: 10px; }
+    }
+
+    /* CODE */
+    pre {
+      background: #20283f;
+      border: 1px solid #2c3654;
+      border-radius: 8px;
+      padding: 18px 20px;
+      overflow-x: auto;
+      font: 13px/1.65 ui-monospace, "SF Mono", Menlo, monospace;
+      color: #e9e1c8;
+      margin: 18px 0;
+    }
+    pre .c { color: #8f9bbd; }
+    pre .k { color: #e0a14e; }
+    pre .s { color: #b6c98a; }
+    pre .p { color: #c98a6a; }
+
+    /* CATALOG CALLOUT */
+    .catalog {
+      margin: 26px 0;
+      padding: 20px 22px;
+      border-left: 4px solid var(--oak);
+      background: var(--paper-lift);
+      border-radius: 0 8px 8px 0;
+    }
+    .catalog p:last-child { margin-bottom: 0; }
+
+    /* GOTCHAS */
+    .gotchas { list-style: none; padding: 0; margin: 24px 0; }
+    .gotchas li {
+      padding: 15px 16px 15px 46px;
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      background: var(--paper-lift);
+      margin-bottom: 10px;
+      position: relative;
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    .gotchas li::before {
+      content: "\2717";
+      position: absolute;
+      left: 17px; top: 15px;
+      color: var(--rust);
+      font-weight: 700;
+    }
+    .gotchas li strong { color: var(--ink); font-weight: 700; }
+
+    /* DECIDER */
+    .decider {
+      margin: 24px 0;
+      padding: 22px 24px;
+      background: var(--paper-lift);
+      border: 1px solid var(--rule);
+      border-radius: 10px;
+    }
+    .decider dt {
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+      color: var(--oak-deep);
+      margin-top: 16px;
+      font-weight: 700;
+    }
+    .decider dt:first-child { margin-top: 0; }
+    .decider dd { margin: 5px 0 0; font-size: 15px; color: var(--ink-soft); line-height: 1.55; }
+    .decider dd strong { color: var(--ink); font-weight: 600; }
+
+    /* SUMMARY */
+    .summary {
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      font-size: 20px;
+      line-height: 1.6;
+      color: var(--ink);
+      border-top: 3px double var(--rule);
+      border-bottom: 3px double var(--rule);
+      padding: 28px 0;
+    }
+
+    /* SOURCES */
+    .sources {
+      margin-top: 72px;
+      padding-top: 28px;
+      border-top: 1px solid var(--rule);
+      font-size: 14px;
+      color: var(--dim);
+    }
+    .sources h3 {
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--dim);
+      margin: 0 0 12px;
+    }
+    .sources ol { padding-left: 20px; margin: 0; }
+    .sources li { margin-bottom: 6px; }
+  </style>
+</head>
+
+<body>
+  <a class="onescroll-backlink" href="/">← onescroll.dev</a>
+
+  <main>
+    <header class="hero">
+      <div class="kicker">Deep dive</div>
+      <h1>How Postgres Is Structured</h1>
+      <p class="lede">
+        Everyone says <em>database</em>, <em>schema</em>, and <em>table</em>
+        loosely — and then gets surprised when a query can't see another
+        database, or when everything lands in <code>public</code> and
+        collides. Postgres has a <strong>precise nesting</strong>. Once you
+        can name every layer, the surprises stop.
+      </p>
+    </header>
+
+    <section>
+      <h2><span class="num">01</span>The question this answers</h2>
+      <p>
+        Where does a row actually <em>live</em>? You connect to "a database,"
+        you create "a table," and somewhere on disk there are files. Between
+        the connection string and the bytes there are four named containers,
+        nested one inside the next, plus a second set of objects that sit
+        <em>outside</em> that nesting and are shared by everything. Confusing
+        the two is the root of most "wait, why can't I…" moments.
+      </p>
+      <p>
+        The whole structure is also <strong>self-describing</strong>: Postgres
+        stores the definition of every database, schema, table, and column as
+        rows in ordinary tables that you can query. Understanding the nesting
+        and the catalog together is understanding the whole shape of the system.
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">02</span>The nesting, named</h2>
+      <p>
+        Five containment levels. The outermost is a single running server;
+        the innermost is a row. Each level lives strictly inside the one above it.
+      </p>
+
+      <div class="nest" id="nest">
+        <div class="layer l-cluster">
+          <span class="tag">Cluster</span>
+          <div><span class="name">one running PostgreSQL server</span> — one data directory, one set of processes, one port</div>
+          <span class="note">Confusingly, this is <em>not</em> a cluster of machines. It's a single instance. Created by <code>initdb</code>.</span>
+          <div class="inner indent">
+            <div class="layer l-db">
+              <span class="tag">Database</span>
+              <div><span class="name">myapp</span> — an isolated namespace tree; ships with <code>postgres</code>, <code>template0</code>, <code>template1</code></div>
+              <span class="note">One connection attaches to exactly one database. You can't query across databases in plain SQL.</span>
+              <div class="indent">
+                <div class="layer l-schema">
+                  <span class="tag">Schema</span>
+                  <div><span class="name">public</span> — a namespace <em>inside</em> a database; holds tables, views, functions, types…</div>
+                  <span class="note">A database can have many schemas. <code>search_path</code> decides which one an unqualified name resolves to.</span>
+                  <div class="indent">
+                    <div class="layer l-table">
+                      <span class="tag">Relation</span>
+                      <div><span class="name">users</span> — a table (also: view, index, sequence — all "relations")</div>
+                      <div class="indent">
+                        <div class="layer l-row">
+                          <span class="tag" style="background:var(--paper);">Row</span>
+                          (id=42, email='…') — a single tuple, the actual data
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="global-side">
+              <b>Cluster-global, beside the tree:</b> roles/users, tablespaces, and the list of databases
+              themselves. These are shared by every database — they are not inside any one of them.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p>
+        Read it as nesting dolls: <code>cluster → database → schema →
+        relation → row</code>. A fully-qualified name walks part of that
+        path: <code>schema.table</code> (and, inside one database, that's as
+        far as references go — there's no <code>database.schema.table</code>
+        you can query from another database).
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">03</span>The mistake MySQL trained into you</h2>
+      <p>
+        In MySQL, <em>database</em> and <em>schema</em> are the same thing —
+        <code>CREATE SCHEMA</code> and <code>CREATE DATABASE</code> are
+        synonyms. In Postgres they are <strong>different levels of the
+        nesting</strong>, and this trips up nearly everyone arriving from MySQL.
+      </p>
+      <p>
+        A Postgres <strong>database</strong> is a hard boundary: separate
+        catalog, separate connection, no cross-database joins in standard SQL.
+        A Postgres <strong>schema</strong> is just a namespace inside a
+        database — a folder for tables. You join across schemas freely;
+        you cannot join across databases without an extension
+        (<code>postgres_fdw</code> or <code>dblink</code>) that opens a second
+        connection under the hood.
+      </p>
+      <p>
+        So a MySQL "database" maps to a Postgres <em>schema</em>, not a
+        Postgres database. Internalize that one sentence and half the
+        confusion evaporates.
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">04</span>Schemas and the search_path</h2>
+      <p>
+        When you write <code>SELECT * FROM users</code> with no schema prefix,
+        Postgres has to decide <em>which</em> schema's <code>users</code> you
+        mean. It walks the <code>search_path</code> — an ordered list of
+        schemas — and uses the first match.
+      </p>
+      <pre><span class="c">-- default search_path</span>
+SHOW search_path;        <span class="c">-- "$user", public</span>
+
+<span class="c">-- $user expands to a schema named after the connected role,</span>
+<span class="c">-- if one exists; otherwise it's skipped. Then public.</span>
+
+<span class="c">-- unqualified: resolved via search_path</span>
+SELECT * FROM users;
+
+<span class="c">-- qualified: unambiguous, ignores search_path</span>
+SELECT * FROM analytics.users;</pre>
+      <p>
+        Schemas earn their keep when you want logical separation
+        <em>without</em> the hard wall of separate databases: grouping a large
+        app into modules (<code>billing</code>, <code>auth</code>,
+        <code>reporting</code>), giving each tenant its own schema while still
+        sharing one connection pool and joining across them, or isolating an
+        extension's objects. The <code>public</code> schema is just the default
+        one — not special, and on modern Postgres no longer writable by every
+        role by default.
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">05</span>What actually lives in a schema</h2>
+      <p>
+        "Schema holds tables" is the common shorthand, but a schema is a
+        namespace for many object kinds, and they <em>share</em> that
+        namespace — you can't have a table and a view with the same name in
+        the same schema:
+      </p>
+      <ul class="gotchas" style="list-style:none">
+        <li style="padding-left:16px"><strong>Tables</strong> and <strong>partitioned tables</strong> — the rows.</li>
+        <li style="padding-left:16px"><strong>Views</strong> and <strong>materialized views</strong> — stored queries; the materialized kind caches results on disk.</li>
+        <li style="padding-left:16px"><strong>Indexes</strong> — separate on-disk structures that point back at table rows.</li>
+        <li style="padding-left:16px"><strong>Sequences</strong> — the counters behind <code>serial</code> / <code>GENERATED … AS IDENTITY</code>.</li>
+        <li style="padding-left:16px"><strong>Functions, procedures, types, operators, domains</strong> — also namespaced by schema.</li>
+      </ul>
+      <p>
+        Tables, views, indexes, sequences, and materialized views are
+        collectively called <em>relations</em> — and Postgres tracks every one
+        of them in a single catalog table, which is the next piece.
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">06</span>The catalog: Postgres describes itself</h2>
+      <p>
+        Here's the part that makes the whole structure click: the metadata
+        about your databases, schemas, tables, and columns is itself stored in
+        <strong>ordinary tables</strong>. They live in a schema called
+        <code>pg_catalog</code>, which is implicitly always on the
+        <code>search_path</code>.
+      </p>
+      <div class="catalog">
+        <p>
+          <code>pg_database</code> — one row per database in the cluster.<br>
+          <code>pg_namespace</code> — one row per schema.<br>
+          <code>pg_class</code> — one row per relation (table, index, view, sequence…).<br>
+          <code>pg_attribute</code> — one row per column.<br>
+          <code>pg_authid</code> — one row per role.
+        </p>
+        <p>
+          Every object has an <code>oid</code> (object identifier) that ties
+          these tables together. The nesting from section 02 is literally
+          foreign-key-shaped relationships between these catalog tables.
+        </p>
+      </div>
+      <pre><span class="c">-- "list my tables" is just a query against the catalog</span>
+SELECT n.nspname <span class="k">AS</span> schema, c.relname <span class="k">AS</span> name
+FROM pg_class c
+JOIN pg_namespace n <span class="k">ON</span> n.oid = c.relnamespace
+WHERE c.relkind = <span class="s">'r'</span>          <span class="c">-- 'r' = ordinary table</span>
+  <span class="k">AND</span> n.nspname <span class="k">NOT IN</span> (<span class="s">'pg_catalog'</span>, <span class="s">'information_schema'</span>);</pre>
+      <p>
+        There's also <code>information_schema</code> — a set of standardized,
+        SQL-spec views over the same data, more portable but less detailed than
+        the native <code>pg_*</code> catalogs. The psql shortcuts
+        (<code>\l</code> databases, <code>\dn</code> schemas, <code>\dt</code>
+        tables) are just pre-written catalog queries.
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">07</span>Global vs. per-database</h2>
+      <p>
+        The single most useful distinction: some objects belong to the whole
+        cluster and are visible from every database; others live inside one
+        database and are invisible from the others.
+      </p>
+      <table class="scope">
+        <thead>
+          <tr><th>Object</th><th>Scope</th><th>Why it matters</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Roles / users</td><td class="gl">cluster-global</td><td>One role logs into any database. You don't recreate users per database.</td></tr>
+          <tr><td>Tablespaces</td><td class="gl">cluster-global</td><td>Storage locations are shared; any database can place objects in one.</td></tr>
+          <tr><td>Databases</td><td class="gl">cluster-global</td><td>The list of databases is a cluster-level catalog (<code>pg_database</code>).</td></tr>
+          <tr><td>Schemas</td><td class="lo">per-database</td><td>A schema exists inside one database only.</td></tr>
+          <tr><td>Tables / views / indexes</td><td class="lo">per-database</td><td>Cannot be seen or joined from another database in plain SQL.</td></tr>
+          <tr><td>Extensions</td><td class="lo">per-database</td><td>Installed into a specific schema of a specific database.</td></tr>
+        </tbody>
+      </table>
+      <p>
+        This is exactly why "create a user" works once for the whole server,
+        but "create the <code>orders</code> table" has to happen inside the
+        right database.
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">08</span>How it lands on disk</h2>
+      <p>
+        The logical nesting maps onto a directory tree under the data
+        directory (<code>PGDATA</code>):
+      </p>
+      <pre><span class="c">$PGDATA/</span>
+  base/<span class="p">&lt;database-oid&gt;</span>/<span class="p">&lt;relfilenode&gt;</span>   <span class="c"># one dir per database; files per relation</span>
+  global/                            <span class="c"># cluster-wide catalogs (roles, databases)</span>
+  pg_wal/                            <span class="c"># the write-ahead log</span>
+  pg_tblspc/                         <span class="c"># symlinks out to tablespaces</span></pre>
+      <p>
+        Each table or index is stored as one or more 1&nbsp;GB segment files,
+        carved into fixed <strong>8&nbsp;KB pages</strong> — the unit Postgres
+        reads and writes. Values too large to fit in a page get pushed to a
+        side table via <strong>TOAST</strong> (compression + out-of-line
+        storage), transparently. A <strong>tablespace</strong> just lets a
+        relation's files live on a different disk/path, represented as a
+        symlink under <code>pg_tblspc/</code>.
+      </p>
+      <h3>oid vs relfilenode — the file-hunting gotcha</h3>
+      <p>
+        Every relation has a stable <code>oid</code>, but the file on disk is
+        named by its <code>relfilenode</code>. They start equal, then diverge
+        whenever a relation is rewritten (<code>VACUUM FULL</code>,
+        <code>TRUNCATE</code>, <code>CLUSTER</code>). To find a table's actual
+        files, ask the catalog with <code>pg_relation_filepath('users')</code>
+        rather than assuming the filename matches the oid.
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">09</span>One table that's secretly many</h2>
+      <p>
+        Declarative <strong>partitioning</strong> bends the "one table = one
+        set of files" picture. A partitioned table is a logical parent with
+        no storage of its own; rows physically live in child <em>partition</em>
+        tables, routed by a key:
+      </p>
+      <pre><span class="c">-- parent: defines the shape and the partition key, stores nothing</span>
+CREATE TABLE events (id bigint, ts timestamptz, body text)
+  PARTITION BY RANGE (ts);
+
+<span class="c">-- children: each is a real table holding a slice of the rows</span>
+CREATE TABLE events_2026_q1 PARTITION OF events
+  FOR VALUES FROM (<span class="s">'2026-01-01'</span>) TO (<span class="s">'2026-04-01'</span>);</pre>
+      <p>
+        Queries hit the parent; Postgres prunes to the relevant children. Each
+        partition is still an ordinary relation in the catalog with its own
+        files — the parent is the abstraction layered on top. (Older code may
+        use table <em>inheritance</em>, the manual precursor; reach for
+        declarative partitioning today.)
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">10</span>Mistakes everyone makes</h2>
+      <ul class="gotchas">
+        <li><strong>Treating database and schema as interchangeable.</strong>
+        Especially coming from MySQL. A new database is a hard wall; a new
+        schema is a folder. Pick on purpose.</li>
+
+        <li><strong>Expecting cross-database queries.</strong>
+        <code>SELECT … FROM otherdb.public.t</code> doesn't work. If you need
+        to query across them, you wanted schemas in one database — or you'll be
+        wiring up <code>postgres_fdw</code>.</li>
+
+        <li><strong>Dumping everything into <code>public</code>.</strong>
+        It works until names collide, permissions get muddy, and an extension
+        drops its objects in beside yours. Group related objects into named
+        schemas early.</li>
+
+        <li><strong>Trusting <code>search_path</code> for correctness or security.</strong>
+        A mutable search path means an unqualified name can resolve somewhere
+        unexpected. In <code>SECURITY DEFINER</code> functions, set an explicit
+        <code>search_path</code> or schema-qualify everything.</li>
+
+        <li><strong>Hunting for a table's file by its oid.</strong>
+        The on-disk name is the <code>relfilenode</code>, which drifts from the
+        oid after rewrites. Use <code>pg_relation_filepath()</code>.</li>
+
+        <li><strong>Assuming a schema is a security boundary.</strong>
+        It's a namespace. Access is controlled by <code>GRANT</code>/<code>REVOKE</code>
+        on the schema and its objects, not by the nesting alone.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2><span class="num">11</span>New database, new schema, or neither?</h2>
+      <dl class="decider">
+        <dt>Separate database</dt>
+        <dd><strong>Hard isolation.</strong> Truly unrelated apps, separate backup/restore lifecycles, no need to ever join the data together. Cost: no cross-querying without an FDW, and per-database setup of extensions and grants.</dd>
+
+        <dt>Separate schema (same database)</dt>
+        <dd><strong>Logical grouping with shared reach.</strong> Modules of one app, or per-tenant separation where you still want one connection pool and the ability to query across tenants. The default answer for "I want to organize my tables."</dd>
+
+        <dt>Neither — just one schema</dt>
+        <dd><strong>Small or single-purpose.</strong> A modest app rarely needs more than <code>public</code> plus maybe one or two named schemas. Don't manufacture structure you won't use.</dd>
+
+        <dt>Partition an existing table</dt>
+        <dd><strong>One huge table by a natural key.</strong> Time-series, or data you routinely query and age out by range/list. Structure for performance and retention, not for organization.</dd>
+      </dl>
+    </section>
+
+    <section>
+      <h2><span class="num">12</span>The shortest mental model</h2>
+      <p class="summary">
+        A Postgres server is one cluster; a cluster holds databases; a database
+        holds schemas; a schema holds tables and other relations; a relation
+        holds rows — and your connection lives inside exactly one database, so
+        it can cross schemas but never databases. Roles and tablespaces sit
+        outside that tree, shared by the whole cluster. And the entire map is
+        kept as rows in the <code>pg_catalog</code> tables, which means Postgres
+        can answer every question about its own structure with a query.
+      </p>
+    </section>
+
+    <aside class="sources">
+      <h3>Sources</h3>
+      <ol>
+        <li>PostgreSQL Documentation — <a href="https://www.postgresql.org/docs/current/">official manual (current release)</a></li>
+        <li><a href="https://www.postgresql.org/docs/current/ddl-schemas.html">Schemas &amp; the search_path</a></li>
+        <li><a href="https://www.postgresql.org/docs/current/catalogs.html">System Catalogs</a> — <code>pg_class</code>, <code>pg_namespace</code>, <code>pg_database</code></li>
+        <li><a href="https://www.postgresql.org/docs/current/storage-file-layout.html">Database File Layout</a> &amp; <a href="https://www.postgresql.org/docs/current/storage-toast.html">TOAST</a></li>
+        <li><a href="https://www.postgresql.org/docs/current/ddl-partitioning.html">Table Partitioning</a></li>
+      </ol>
+    </aside>
+  </main>
+
+  <script src="/_shared/freshness.js"></script>
+  <script>
+    document.documentElement.classList.add('js');
+    // Reveal nesting layers progressively
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const layers = document.querySelectorAll('#nest .layer');
+    if (reduced) {
+      layers.forEach(l => l.classList.add('in'));
+    } else {
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting) {
+            const idx = [...layers].indexOf(e.target);
+            setTimeout(() => e.target.classList.add('in'), Math.max(0, idx) * 120);
+            io.unobserve(e.target);
+          }
+        });
+      }, { threshold: 0.15 });
+      layers.forEach(l => io.observe(l));
+    }
+  </script>
+</body>
+</html>

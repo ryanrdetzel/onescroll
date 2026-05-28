@@ -6,6 +6,13 @@
       "blurb": "How third-party apps get permission to act on your behalf — without ever seeing your password.",
       "generated": "2026-05-28",
       "volatility": "evergreen"
+    },
+    {
+      "slug": "postgres-structure",
+      "title": "How Postgres Is Structured",
+      "blurb": "The nesting that everyone uses loosely and few can name precisely: cluster, database, schema, table, row — and the catalog that describes it all.",
+      "generated": "2026-05-28",
+      "volatility": "evergreen"
     }
   ]
 }
