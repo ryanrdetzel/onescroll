@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OAuth 2.0 · onescroll.dev</title>
+  <meta name="description" content="A one-page deep dive on OAuth 2.0 — roles, the authorization code flow with PKCE, tokens, and the mistakes everyone makes.">
+  <link rel="stylesheet" href="/_shared/freshness.css">
+
+  <script type="application/json" id="onescroll-meta">
+  {
+    "topic": "oauth",
+    "title": "OAuth 2.0",
+    "generated": "2026-05-28",
+    "volatility": "evergreen",
+    "sources": [
+      { "title": "RFC 6749 — The OAuth 2.0 Authorization Framework", "url": "https://datatracker.ietf.org/doc/html/rfc6749", "date": "2012-10-01" },
+      { "title": "RFC 7636 — PKCE", "url": "https://datatracker.ietf.org/doc/html/rfc7636", "date": "2015-09-01" },
+      { "title": "OAuth 2.1 (draft)", "url": "https://datatracker.ietf.org/doc/draft-ietf-oauth-v2-1/", "date": "2025-01-01" }
+    ]
+  }
+  </script>
+
+  <style>
+    :root {
+      --bg: #0a0e1a;
+      --bg-lift: #131829;
+      --ink: #f4ecd8;
+      --dim: #9aa3b8;
+      --gold: #f0a830;
+      --gold-dim: #b87f1f;
+      --rule: #1f263d;
+      --danger: #e07a55;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(ellipse at top, #1a2040 0%, var(--bg) 60%),
+        var(--bg);
+      color: var(--ink);
+      font: 17px/1.7 "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+      html { scroll-behavior: auto; }
+    }
+
+    .onescroll-backlink {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 100;
+      font: 13px/1 ui-monospace, "SF Mono", Menlo, monospace;
+      color: var(--dim);
+      text-decoration: none;
+      padding: 8px 12px;
+      border: 1px solid var(--rule);
+      border-radius: 999px;
+      background: rgba(10, 14, 26, 0.7);
+      backdrop-filter: blur(8px);
+      letter-spacing: 0.02em;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .onescroll-backlink:hover { color: var(--gold); border-color: var(--gold-dim); }
+
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 96px 24px 120px;
+    }
+
+    /* HERO */
+    .hero {
+      padding: 64px 0 80px;
+      border-bottom: 1px solid var(--rule);
+      margin-bottom: 64px;
+      position: relative;
+    }
+    .hero::before {
+      content: "";
+      position: absolute;
+      top: 24px;
+      right: 0;
+      width: 56px;
+      height: 56px;
+      background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f0a830' stroke-width='1.5'><rect x='5' y='11' width='14' height='10' rx='1.5'/><path d='M8 11V7a4 4 0 0 1 8 0v4'/><circle cx='12' cy='16' r='1.2' fill='%23f0a830'/></svg>") center/contain no-repeat;
+      opacity: 0.85;
+    }
+    .kicker {
+      font: 12px/1 ui-monospace, monospace;
+      color: var(--gold);
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      margin-bottom: 24px;
+    }
+    h1 {
+      font-family: ui-serif, "Iowan Old Style", Georgia, serif;
+      font-size: clamp(48px, 10vw, 88px);
+      font-weight: 400;
+      letter-spacing: -0.025em;
+      line-height: 1;
+      margin: 0 0 24px;
+    }
+    .lede {
+      font-size: 21px;
+      line-height: 1.55;
+      color: var(--dim);
+      max-width: 56ch;
+      margin: 0;
+    }
+    .lede strong { color: var(--ink); font-weight: 500; }
+
+    /* SECTIONS */
+    section {
+      margin-bottom: 80px;
+      scroll-margin-top: 32px;
+    }
+    h2 {
+      font-family: ui-serif, "Iowan Old Style", Georgia, serif;
+      font-size: 36px;
+      font-weight: 500;
+      letter-spacing: -0.015em;
+      line-height: 1.15;
+      margin: 0 0 24px;
+    }
+    h2 .num {
+      display: inline-block;
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+      color: var(--gold);
+      vertical-align: top;
+      margin-right: 12px;
+      padding-top: 12px;
+    }
+    h3 {
+      font-size: 17px;
+      font-weight: 600;
+      margin: 32px 0 8px;
+      color: var(--gold);
+      letter-spacing: 0.01em;
+    }
+    p { margin: 0 0 18px; }
+    a { color: var(--gold); text-decoration: underline; text-underline-offset: 3px; }
+
+    /* ROLES GRID */
+    .roles {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin: 24px 0;
+    }
+    .role {
+      padding: 18px;
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      background: var(--bg-lift);
+    }
+    .role-name {
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      color: var(--gold);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .role-body {
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--dim);
+    }
+    .role-body strong { color: var(--ink); font-weight: 500; }
+
+    /* FLOW DIAGRAM */
+    .flow {
+      margin: 32px 0;
+      padding: 24px;
+      background: var(--bg-lift);
+      border: 1px solid var(--rule);
+      border-radius: 12px;
+    }
+    .flow-step {
+      display: grid;
+      grid-template-columns: 36px 1fr;
+      gap: 16px;
+      padding: 14px 0;
+      border-bottom: 1px dashed var(--rule);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.5s, transform 0.5s;
+    }
+    .flow-step:last-child { border-bottom: none; }
+    .flow-step.in { opacity: 1; transform: translateY(0); }
+    .flow-step .n {
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+      color: var(--gold);
+      border: 1px solid var(--gold-dim);
+      border-radius: 50%;
+      width: 28px; height: 28px;
+      display: grid; place-items: center;
+      font-weight: 600;
+    }
+    .flow-step .body { font-size: 15px; line-height: 1.55; }
+    .flow-step .body code {
+      font-size: 13px;
+      background: rgba(240, 168, 48, 0.1);
+      color: var(--gold);
+      padding: 1px 6px;
+      border-radius: 3px;
+    }
+    .flow-step .arrow {
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      color: var(--dim);
+      display: block;
+      margin-bottom: 4px;
+      letter-spacing: 0.05em;
+    }
+
+    /* CODE */
+    pre {
+      background: var(--bg-lift);
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      padding: 18px 20px;
+      overflow-x: auto;
+      font: 13px/1.6 ui-monospace, "SF Mono", Menlo, monospace;
+      color: var(--ink);
+      margin: 16px 0;
+    }
+    pre .c { color: var(--dim); }
+    pre .k { color: var(--gold); }
+
+    /* TOKEN TABLE */
+    .tokens {
+      display: grid;
+      gap: 12px;
+      margin: 24px 0;
+    }
+    .token {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 16px;
+      padding: 16px;
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      background: var(--bg-lift);
+    }
+    .token-name {
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+      color: var(--gold);
+      align-self: start;
+    }
+    .token-desc { font-size: 14px; line-height: 1.55; color: var(--dim); }
+    .token-desc strong { color: var(--ink); font-weight: 500; }
+    @media (max-width: 540px) {
+      .token { grid-template-columns: 1fr; gap: 4px; }
+    }
+
+    /* GOTCHAS */
+    .gotchas { list-style: none; padding: 0; margin: 24px 0; }
+    .gotchas li {
+      padding: 16px 16px 16px 44px;
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      background: var(--bg-lift);
+      margin-bottom: 10px;
+      position: relative;
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    .gotchas li::before {
+      content: "✕";
+      position: absolute;
+      left: 16px; top: 16px;
+      color: var(--danger);
+      font-weight: 600;
+    }
+    .gotchas li strong { color: var(--ink); font-weight: 600; }
+
+    /* DECIDER */
+    .decider {
+      margin: 24px 0;
+      padding: 24px;
+      background: var(--bg-lift);
+      border: 1px solid var(--rule);
+      border-radius: 12px;
+    }
+    .decider dt {
+      font-family: ui-monospace, monospace;
+      font-size: 13px;
+      color: var(--gold);
+      margin-top: 14px;
+    }
+    .decider dd {
+      margin: 4px 0 0;
+      font-size: 15px;
+      color: var(--dim);
+      line-height: 1.55;
+    }
+    .decider dd strong { color: var(--ink); font-weight: 500; }
+
+    /* SOURCES */
+    .sources {
+      margin-top: 80px;
+      padding-top: 32px;
+      border-top: 1px solid var(--rule);
+      font-size: 14px;
+      color: var(--dim);
+    }
+    .sources h3 {
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--dim);
+      margin: 0 0 12px;
+    }
+    .sources ol { padding-left: 20px; margin: 0; }
+    .sources li { margin-bottom: 6px; }
+  </style>
+</head>
+
+<body>
+  <a class="onescroll-backlink" href="/">← onescroll.dev</a>
+
+  <main>
+    <header class="hero">
+      <div class="kicker">Deep dive</div>
+      <h1>OAuth 2.0</h1>
+      <p class="lede">
+        How third-party apps get permission to act on your behalf —
+        <strong>without ever seeing your password</strong>. A protocol
+        about delegated authorization, not authentication.
+      </p>
+    </header>
+
+    <section>
+      <h2><span class="num">01</span>The problem</h2>
+      <p>
+        You want a calendar app to read events from your Google account.
+        The naive solution is to hand it your Google password. That's a
+        disaster: the app can do <em>anything</em> as you, forever, and
+        rotating your password means re-entering it in every connected app.
+      </p>
+      <p>
+        OAuth 2.0 splits this into two things: <strong>authentication</strong>
+        (proving who you are to Google — Google's problem) and
+        <strong>delegation</strong> (Google telling the calendar app
+        "this user said you can read their events"). The calendar app
+        gets a token, not a password. The token is scoped, expirable,
+        and revocable.
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">02</span>The four roles</h2>
+      <p>Every OAuth flow has the same cast:</p>
+      <div class="roles">
+        <div class="role">
+          <div class="role-name">Resource owner</div>
+          <div class="role-body"><strong>You.</strong> The human who owns the data.</div>
+        </div>
+        <div class="role">
+          <div class="role-name">Client</div>
+          <div class="role-body"><strong>The app</strong> that wants access — the calendar app in the example.</div>
+        </div>
+        <div class="role">
+          <div class="role-name">Authorization server</div>
+          <div class="role-body"><strong>Issues tokens.</strong> Google's accounts service. Asks you to consent.</div>
+        </div>
+        <div class="role">
+          <div class="role-name">Resource server</div>
+          <div class="role-body"><strong>Holds the data.</strong> The Google Calendar API. Verifies tokens.</div>
+        </div>
+      </div>
+      <p>
+        The authorization server and resource server often live at the same
+        company but are conceptually distinct — one mints tokens, the other
+        accepts them.
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">03</span>The flow that matters</h2>
+      <p>
+        OAuth 2.0 originally specified four flows. <strong>Today, you should
+        use exactly one</strong>: the <em>Authorization Code Flow with PKCE</em>.
+        Implicit flow is dead. Password grant is dead. Client credentials is
+        for machine-to-machine, not user delegation. OAuth 2.1 codifies this.
+      </p>
+
+      <div class="flow" id="flow">
+        <div class="flow-step">
+          <div class="n">1</div>
+          <div class="body">
+            <span class="arrow">CLIENT → BROWSER</span>
+            App generates a random <code>code_verifier</code>, derives
+            <code>code_challenge = SHA256(verifier)</code>, and redirects
+            you to the authorization server with the challenge attached.
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="n">2</div>
+          <div class="body">
+            <span class="arrow">BROWSER → AUTH SERVER</span>
+            You log in (if not already) and see a consent screen:
+            <em>"Calendar App wants to read your events."</em> You approve.
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="n">3</div>
+          <div class="body">
+            <span class="arrow">AUTH SERVER → BROWSER → CLIENT</span>
+            The auth server redirects back to the app's <code>redirect_uri</code>
+            with a short-lived <code>authorization_code</code> in the URL.
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="n">4</div>
+          <div class="body">
+            <span class="arrow">CLIENT → AUTH SERVER (back channel)</span>
+            App POSTs the code <em>and</em> the original
+            <code>code_verifier</code> to the token endpoint. Server checks
+            <code>SHA256(verifier)</code> matches the challenge from step 1.
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="n">5</div>
+          <div class="body">
+            <span class="arrow">AUTH SERVER → CLIENT</span>
+            Server returns an <code>access_token</code> (and usually a
+            <code>refresh_token</code>). The auth code is now burned.
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="n">6</div>
+          <div class="body">
+            <span class="arrow">CLIENT → RESOURCE SERVER</span>
+            App calls the API: <code>Authorization: Bearer &lt;access_token&gt;</code>.
+          </div>
+        </div>
+      </div>
+
+      <h3>Why PKCE?</h3>
+      <p>
+        Step 3 puts the auth code in a URL, which means it can leak —
+        browser history, server logs, a malicious app intercepting the
+        redirect on a mobile OS. PKCE makes the leak useless: an attacker
+        who steals the code can't redeem it without the original verifier,
+        which never left the client.
+      </p>
+      <p>
+        Originally PKCE was a public-client patch (mobile, SPAs). Now it's
+        recommended for <em>all</em> clients, including ones with a secret.
+      </p>
+    </section>
+
+    <section>
+      <h2><span class="num">04</span>The tokens</h2>
+      <div class="tokens">
+        <div class="token">
+          <div class="token-name">access_token</div>
+          <div class="token-desc">
+            <strong>Short-lived</strong> (minutes to an hour). Sent on
+            every API call. Treat like a password: never log it, never
+            expose to JS you don't trust. Often a JWT, but the spec doesn't
+            require any format — to the client, it's an opaque string.
+          </div>
+        </div>
+        <div class="token">
+          <div class="token-name">refresh_token</div>
+          <div class="token-desc">
+            <strong>Long-lived</strong> (days to forever). Used only at
+            the token endpoint to get a new access token. Should be
+            <em>more</em> protected than access tokens — leaking one
+            means persistent access. Rotate on every use if you can.
+          </div>
+        </div>
+        <div class="token">
+          <div class="token-name">id_token</div>
+          <div class="token-desc">
+            <strong>Not OAuth — OpenID Connect.</strong> A signed JWT
+            describing who logged in (subject, email, etc). For the
+            client to know <em>who</em> the user is, not for talking to
+            APIs. If you only need login, you want OIDC, not raw OAuth.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2><span class="num">05</span>Mistakes everyone makes</h2>
+      <ul class="gotchas">
+        <li><strong>Using OAuth for authentication.</strong> OAuth proves
+        the user authorized an app — not that the user is present at the
+        client right now. Use OpenID Connect for "log in with Google."</li>
+
+        <li><strong>Storing tokens in localStorage in an SPA.</strong>
+        Any XSS reads them. Prefer a backend-for-frontend pattern: cookies
+        with <code>HttpOnly; Secure; SameSite</code>, server proxies the API.</li>
+
+        <li><strong>Skipping the <code>state</code> parameter.</strong>
+        Without it, the redirect from the auth server is unauthenticated.
+        Use <code>state</code> as a CSRF token tied to the user's session.</li>
+
+        <li><strong>Wildcard redirect URIs.</strong> Every accepted
+        redirect URI must be a registered, exact match. Open redirects
+        in your app become token theft.</li>
+
+        <li><strong>Never rotating refresh tokens.</strong> If a refresh
+        token leaks and you don't rotate, the attacker has access forever.
+        Rotate on every use and revoke the chain on detected reuse.</li>
+
+        <li><strong>Confusing scopes with permissions.</strong> A scope
+        is what the user consented to. Your resource server still has to
+        enforce that <em>this user</em> can actually access <em>this resource</em>.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2><span class="num">06</span>Which flow, when</h2>
+      <dl class="decider">
+        <dt>Web app with a backend</dt>
+        <dd><strong>Authorization Code + PKCE.</strong> Tokens live server-side; browser only sees a session cookie.</dd>
+
+        <dt>SPA with no backend</dt>
+        <dd><strong>Authorization Code + PKCE</strong>, but seriously consider giving it a backend. Bearer tokens in a browser are a recurring footgun.</dd>
+
+        <dt>Mobile / desktop app</dt>
+        <dd><strong>Authorization Code + PKCE</strong>, via the system browser (not a webview). Use the platform's app-link mechanism for the redirect.</dd>
+
+        <dt>CLI tool</dt>
+        <dd><strong>Authorization Code + PKCE</strong> with a loopback redirect (<code>http://127.0.0.1:&lt;random-port&gt;</code>), or device code flow if you can't open a browser.</dd>
+
+        <dt>Server-to-server, no user</dt>
+        <dd><strong>Client Credentials.</strong> No human in the loop, no delegation — just an app proving who it is.</dd>
+
+        <dt>Just want "log in with Google"</dt>
+        <dd><strong>OpenID Connect</strong> (which builds on Authorization Code + PKCE).</dd>
+      </dl>
+    </section>
+
+    <section>
+      <h2><span class="num">07</span>The shortest mental model</h2>
+      <p>
+        Three sentences. OAuth gives a token to an app so it can act on
+        your behalf, scoped to what you agreed to. The token is obtained
+        through a redirect dance that keeps your password out of the
+        app's hands and the token out of the URL bar. Everything else —
+        PKCE, state, refresh rotation, BFF — is hardening that dance
+        against a specific attack.
+      </p>
+    </section>
+
+    <aside class="sources">
+      <h3>Sources</h3>
+      <ol>
+        <li>RFC 6749 — <a href="https://datatracker.ietf.org/doc/html/rfc6749">The OAuth 2.0 Authorization Framework</a></li>
+        <li>RFC 7636 — <a href="https://datatracker.ietf.org/doc/html/rfc7636">Proof Key for Code Exchange (PKCE)</a></li>
+        <li>RFC 8252 — <a href="https://datatracker.ietf.org/doc/html/rfc8252">OAuth 2.0 for Native Apps</a></li>
+        <li><a href="https://datatracker.ietf.org/doc/draft-ietf-oauth-v2-1/">OAuth 2.1 (draft)</a> — consolidates the modern best practices</li>
+      </ol>
+    </aside>
+  </main>
+
+  <script src="/_shared/freshness.js"></script>
+  <script>
+    // Reveal flow steps on intersection
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduced) {
+      document.querySelectorAll('.flow-step').forEach(s => s.classList.add('in'));
+    } else {
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach((e, i) => {
+          if (e.isIntersecting) {
+            setTimeout(() => e.target.classList.add('in'), i * 60);
+            io.unobserve(e.target);
+          }
+        });
+      }, { threshold: 0.2 });
+      document.querySelectorAll('.flow-step').forEach(s => io.observe(s));
+    }
+  </script>
+</body>
+</html>
