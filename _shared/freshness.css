@@ -1,0 +1,21 @@
+/* onescroll.dev — shared CSS. Keep this MINIMAL.
+   The only thing that must look consistent across all topic pages
+   is the stale-content banner. Everything else is the page's call. */
+
+.onescroll-stale-banner {
+  background: #fff3cd;
+  color: #5c4a00;
+  padding: 10px 16px;
+  text-align: center;
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  border-bottom: 1px solid #f0d878;
+  position: sticky;
+  top: 0;
+  z-index: 9999;
+}
+
+.onescroll-stale-banner a {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}

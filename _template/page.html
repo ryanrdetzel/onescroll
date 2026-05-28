@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<!--
+  onescroll.dev — TOPIC PAGE TEMPLATE
+  Read DESIGN_SPEC.md before editing. The brief:
+    • Inline all CSS and JS. No build step. No npm.
+    • Keep the items inside <!-- SPINE --> blocks. They are non-negotiable.
+    • Everything inside <!-- CREATIVE --> blocks is yours — go make it
+      feel like the topic. Pick a vibe, commit to it.
+-->
+<html lang="en">
+<head>
+  <!-- SPINE: meta -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TOPIC TITLE · onescroll.dev</title>
+  <meta name="description" content="One-page deep dive on TOPIC.">
+  <link rel="stylesheet" href="/_shared/freshness.css">
+
+  <!-- SPINE: page metadata. Update on every regeneration. -->
+  <script type="application/json" id="onescroll-meta">
+  {
+    "topic": "TOPIC-SLUG",
+    "title": "TOPIC TITLE",
+    "generated": "YYYY-MM-DD",
+    "volatility": "evergreen",
+    "sources": [
+      { "title": "Source title", "url": "https://example.com", "date": "YYYY-MM-DD" }
+    ]
+  }
+  </script>
+
+  <!-- CREATIVE: <style> goes here. Pick a palette, typography, layout.
+       Honor prefers-reduced-motion. Hit WCAG AA on body text. -->
+  <style>
+    /* your styles */
+  </style>
+</head>
+
+<body>
+  <!-- SPINE: persistent back-link to the index. Style however you like,
+       but keep the .onescroll-backlink class so it's discoverable. -->
+  <a class="onescroll-backlink" href="/">← onescroll.dev</a>
+
+  <!-- CREATIVE: the page. <main> with one <h1>, headings in order. -->
+  <main>
+    <h1>Topic title</h1>
+    <!-- your deep dive -->
+  </main>
+
+  <!-- SPINE: freshness banner script. Keep last. -->
+  <script src="/_shared/freshness.js"></script>
+</body>
+</html>
